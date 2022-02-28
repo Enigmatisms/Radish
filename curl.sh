@@ -1,0 +1,2 @@
+curl -d '{"id":1,"jsonrpc":"2.0","method":"sessionLogin","params":{"query":{"password":"bbZGs3wFsB35","timeout":{"time":1200,"resolution":1,"valid":false},"userName":"admin"}}}' http://127.0.0.1:8080
+curl -d '{"id":1,"jsonrpc":"2.0","method":"configSet","params":{"query":{"sessionId":"a38404c2-de7f-46a4-bbb7-ca736b6ac6e8","configEntries":[{"key":"licensing.method","value":"WIBUDONGLE"}]}}}' http://127.0.0.1:8080
