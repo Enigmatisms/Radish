@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 #coding=utf8
 
-
-'''This is a converter for the Intel Research Lab SLAM dataset
-   ( http://kaspar.informatik.uni-freiburg.de/~slamEvaluation/datasets/intel.clf )
-   to rosbag'''
+'''
+    This script is run by python2, python3 will fail on this
+'''
 
 import rosbag
 import logging
@@ -13,15 +12,11 @@ from math import ceil, floor
 
 logging.basicConfig()
 
-if __name__ == "__main__":
-    if len(argv) < 3:
-        print("Usage: python2 ./modifyScan.py <input rosbag name>.bag <intended angle span in rads>")
-        exit(-1)
-    bag_name = argv[1]
+def scanTrimmer(bag_name):
     name_no_ext = bag_name.split('.')[0]
     angle_trim = abs(float(argv[2]))
-    bag_in = rosbag.Bag("./" + bag_name, "r")
-    bag_out = rosbag.Bag("./" + name_no_ext + "_st.bag", "w")
+    bag_in = rosbag.Bag(bag_name, "r")
+    bag_out = rosbag.Bag(name_no_ext + "_st.bag", "w")
     angle_min_max_set = False
     min_trim, max_trim = 0, 0
     saved_angle_max = 0.0
@@ -57,3 +52,39 @@ if __name__ == "__main__":
     print "Process completed."
     print "Original angle min: %f, angle max: %f, angle inc: %f"%(saved_angle_min, saved_angle_max, saved_angle_inc)
     print "Min max trim: %d, %d, actual length: %d, origin length: %d"%(min_trim, max_trim, actual_length, origin_length)
+
+def tfRemoval(bag_name):
+    name_no_ext = bag_name.split('.')[0]
+    bag_in = rosbag.Bag(bag_name, "r")
+    bag_out = rosbag.Bag(name_no_ext + "_st.bag", "w")
+    for topic, msg, t in bag_in.read_messages():
+        if not str(msg._type) == "sensor_msgs/LaserScan":
+            continue
+        bag_out.write(topic, msg, t)
+    print "Process completed. All the messages in the output bag should be of type 'sensor_msgs/LaserScan'."
+    bag_in.close()
+    bag_out.close()
+
+# remove all the messages whose topic is but topic_name
+def conditionalRemove(bag_name, topic_name):
+    name_no_ext = bag_name.split('.')[0]
+    bag_in = rosbag.Bag(bag_name, "r")
+    bag_out = rosbag.Bag(name_no_ext + "_st.bag", "w")
+    for topic, msg, t in bag_in.read_messages():
+        # print "topic name: %s"%(topic)
+        if not topic == topic_name:
+            continue
+        bag_out.write(topic, msg, t)
+    print "Process completed. All the messages in the output bag should only contain topic '%s'"%(topic_name)
+    bag_in.close()
+    bag_out.close()
+
+if __name__ == "__main__":
+    if len(argv) < 3:
+        print("Usage: python2 ./modifyScan.py <input rosbag name>.bag <intended angle span in rads>")
+        exit(-1)
+    bag_name = argv[1]
+    # scanTrimmer(bag_name)
+    # tfRemoval(bag_name)
+    conditionalRemove(bag_name, "/scan")
+    
