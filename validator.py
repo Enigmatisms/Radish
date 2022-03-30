@@ -1,6 +1,11 @@
 #!/usr/bin/env python2
 #-*-coding:utf-8-*-
 
+"""
+    Some of the rosbags may exhibit problems like: (angle_max - angle_min) / resolution != point_num - 1
+    This will cause fatal errors in some of the algorithms
+"""
+
 import rosbag
 from sys import argv
 from math import ceil

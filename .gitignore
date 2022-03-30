@@ -1,6 +1,2 @@
-*
-!*.py
-!*.cc
-!*.sh
-!*.md
-!.gitignore
+**/__pycache__
+data/**

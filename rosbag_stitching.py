@@ -9,7 +9,7 @@ import rosbag
 from sys import argv
 import os
 
-def conditionalRemove(bag_name, bag_out, topic_name = None):
+def bagStitching(bag_name, bag_out, topic_name = None):
     bag_in = rosbag.Bag(bag_name, "r")
     for topic, msg, t in bag_in.read_messages():
         # print "topic name: %s"%(topic)
@@ -32,8 +32,6 @@ if __name__ == "__main__":
     all_files = os.listdir(directory)
     all_files.sort()
     for i in range(initial_skip, initial_skip + max_bag_num):
-        conditionalRemove(directory + all_files[i], bag_out, "/scan")
+        bagStitching(directory + all_files[i], bag_out, "/scan")
     bag_out.close()
     print("Process completed.")
-
-# bag_out = rosbag.Bag(name_no_ext + "_st.bag", "w")
