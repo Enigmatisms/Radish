@@ -35,11 +35,11 @@ def validate(bag_name):
             if len(msg.intensities) == 0:
                 zero_cnt += 1
                 continue
-            print "Scan %d should have point num: %d, yet ranges or intensities doesn't. (%d, %d)"%(i, point_num, len(msg.ranges), len(msg.intensities))
+            print("Scan %d should have point num: %d, yet ranges or intensities doesn't. (%d, %d)"%(i, point_num, len(msg.ranges), len(msg.intensities)))
             error_cnt += 1
-    print "%d messages related to laser scan, %d of them are faulty, %d of them have no intensity."%(total_cnt, error_cnt, zero_cnt)
-    print "Point num: %d, range number: %d"%(typical_point_num, typical_range)
-    print "Angle inc: %.7lf, should have been %.7lf"%(angle_inc, (angle_max - angle_min) / (typical_range - 1))
+    print("%d messages related to laser scan, %d of them are faulty, %d of them have no intensity."%(total_cnt, error_cnt, zero_cnt))
+    print("Point num: %d, range number: %d"%(typical_point_num, typical_range))
+    print("Angle inc: %.7lf, should have been %.7lf"%(angle_inc, (angle_max - angle_min) / (typical_range - 1)))
     bag_in.close()
 
 # 激光雷达的角度分辨率与点数关系应该是(max - min) / inc = num - 1 而不是 (max - min) / inc = num
@@ -69,12 +69,12 @@ def fixAngleIncrement(bag_name):
                 angle_inc = msg.angle_increment
             fix_num += 1
         bag_out.write(topic, msg, t)
-    print "Previous angle max: %.7lf, current angle max %.7lf"%(original_max, now_max)
-    print "Angle_min: %.6lf, angle inc: %.6lf, point num: %d"%(original_min, angle_inc, saved_point_num)
+    print("Previous angle max: %.7lf, current angle max %.7lf"%(original_max, now_max))
+    print("Angle_min: %.6lf, angle inc: %.6lf, point num: %d"%(original_min, angle_inc, saved_point_num))
     bag_out.close()
     bag_in.close()
 
 if __name__ == "__main__":
     if len(argv) < 2:
-        print "Usage: python2 ./validator.py <path to the rosbag>"
+        print("Usage: python2 ./validator.py <path to the rosbag>")
     fixAngleIncrement(argv[1])

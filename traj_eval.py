@@ -16,21 +16,25 @@ class TrajEval:
         pass
 
     @staticmethod
-    def readFromFile(path:str)->np.array:
+    def readFromFile(path:str, use_flag:bool = False)->np.array:
         with open(path, 'r') as file:
             raw_all = file.readlines()
-            result = np.zeros((len(raw_all), 4))
+            result = np.zeros((len(raw_all), 5 if use_flag else 4))
             for i, line in enumerate(raw_all):
                 stripped = line.split(' ')
                 result[i, 0] = float(stripped[0]) / 1e9
                 for j in range(1, 3):
                     result[i, j] = float(stripped[j])
-                angle = float(stripped[-1][:-1])
+                angle = float(stripped[3][:None if use_flag else -1])
                 while angle > np.pi:
                     angle -= np.pi * 2
                 while angle < -np.pi:
                     angle += np.pi * 2
-                result[i, -1] = angle
+                result[i, 3] = angle
+                if use_flag:
+                    result[i, -1] = int(stripped[-1][0])
+            if use_flag:
+                return result[result[:, -1] > 0.5, :-1]
             return result
 
     @staticmethod
@@ -131,7 +135,7 @@ class TrajEval:
         return (x_mean, x_std), (y_mean, y_std), (t_mean, t_std), (err_mean_2d, err_std_2d), (err_mean_3d, err_std_3d)
 
     @staticmethod
-    def traverseFolder(folder:str, start_with:str, save_fig:bool = False, make_abs:bool = False, verbose:bool = False):
+    def traverseFolder(folder:str, start_with:str, save_fig:bool = False, make_abs:bool = False, verbose:bool = False, use_flag = False):
         all_stuff = os.listdir(folder)
         gt_file_path = folder + "c_gt.tjc"
         if not os.path.exists(gt_file_path):
@@ -151,7 +155,7 @@ class TrajEval:
                 continue
             if start_with == "gmap_" and stuff == "gmap_gt.txt":
                 continue
-            traj_data = TrajEval.readFromFile(stuff_path)
+            traj_data = TrajEval.readFromFile(stuff_path, use_flag)
             x_error, y_error, theta_error, error_2d, error_3d = TrajEval.temperalNearestNeighborEvaluator(traj_data, gt_data)
             # 提供一个可以自动保存部分截图的方法
             if save_fig:
@@ -164,8 +168,8 @@ class TrajEval:
                 # TrajEval.visualizeTrajError(error_2d, error_3d)
                 # plt.savefig(fig_folder + start_with + "%d_err_traj.jpg"%(i))
                 # plt.clf()
-                TrajEval.visualizeWithGT(folder, stuff[:-4])
-                plt.savefig(fig_folder + start_with + "%d_gt_traj.jpg"%(i))
+                TrajEval.visualizeWithGT(folder, stuff[:-4], use_flag)
+                plt.savefig(fig_folder + start_with + "%d_gt_traj.png"%(i))
                 plt.clf()
                 plt.cla()
             if verbose:
@@ -182,11 +186,11 @@ class TrajEval:
         TrajEval.mean_std(x_means, y_means, t_means, traj_2d_means, traj_3d_means, make_abs, True)
 
     @staticmethod
-    def visualizeWithGT(folder:str, traj_name:str):
+    def visualizeWithGT(folder:str, traj_name:str, use_flag:bool = False):
         gt_file_path = folder + "c_gt.tjc"
         traj_path = folder + traj_name + ".tjc"
         gt_data = TrajEval.readFromFile(gt_file_path)
-        traj_data = TrajEval.readFromFile(traj_path)
+        traj_data = TrajEval.readFromFile(traj_path, use_flag)
         TrajEval.visualizeOneTrajectory(gt_data, 3, label = 'gt trajectory')
         TrajEval.visualizeOneTrajectory(traj_data, 3, label = '%s trajectory'%(traj_name))
         plt.legend()
@@ -222,12 +226,14 @@ def binarySearchTest():
         print("Query: %f, result: %d, %f"%(q, idx, result))
 
 def automatic_runner():
-    TrajEval.traverseFolder(argv[1], argv[2], verbose = True, save_fig = True)
+    TrajEval.traverseFolder(argv[1], argv[2], verbose = True, save_fig = True, use_flag = False)
 
 def trajectory_compare():
     TrajEval.visualizeDifferentMethods(argv[1], int(argv[2]))
+
 
 if __name__ == "__main__":
     # TrajEval.traverseFolder(argv[1], argv[2], verbose = True, save_fig = True)
     automatic_runner()
     # TrajEval.visualizeWithGT(argv[1], "carto_0")
+    # TrajEval.readFromFile(argv[1], True)
