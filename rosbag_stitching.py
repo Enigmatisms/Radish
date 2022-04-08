@@ -16,7 +16,7 @@ def bagStitching(bag_name, bag_out, topic_name = None):
         if not topic_name is None and not topic == topic_name:
             continue
         bag_out.write(topic, msg, t)
-    print "Bag '%s' is merged into the current bag with messages having '%s' as topic"%(bag_name, topic_name)
+    print("Bag '%s' is merged into the current bag with messages having '%s' as topic"%(bag_name, topic_name))
     bag_in.close()
 
 if __name__ == "__main__":

@@ -25,7 +25,10 @@ class TrajEval:
                 result[i, 0] = float(stripped[0]) / 1e9
                 for j in range(1, 3):
                     result[i, j] = float(stripped[j])
-                angle = float(stripped[3][:None if use_flag else -1])
+                if stripped[3][-1] == '\n':
+                    angle = float(stripped[3][:-1])
+                else:
+                    angle = float(stripped[3])
                 while angle > np.pi:
                     angle -= np.pi * 2
                 while angle < -np.pi:
@@ -173,7 +176,7 @@ class TrajEval:
                 plt.clf()
                 plt.cla()
             if verbose:
-                print("============== %s%d error output ================"%(start_with, i))
+                print("============== %s%d error output %s ================"%(start_with, i, stuff))
             (x_mean, _), (y_mean, _), (t_mean, _), (err_mean_2d, _), (err_mean_3d, _) = \
             TrajEval.mean_std(x_error, y_error, theta_error, error_2d, error_3d, make_abs, verbose)
             x_means.append(x_mean)
@@ -236,4 +239,4 @@ if __name__ == "__main__":
     # TrajEval.traverseFolder(argv[1], argv[2], verbose = True, save_fig = True)
     automatic_runner()
     # TrajEval.visualizeWithGT(argv[1], "carto_0")
-    # TrajEval.readFromFile(argv[1], True)
+    # TrajEval.readFromFile(argv[1])
