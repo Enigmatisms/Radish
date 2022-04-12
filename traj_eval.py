@@ -5,7 +5,9 @@
 """
 
 from tabnanny import verbose
+from unittest import result
 import numpy as np
+from numpy.linalg import svd, det
 import matplotlib.pyplot as plt
 import os
 from sys import argv
@@ -14,6 +16,15 @@ from sys import argv
 class TrajEval:
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def goodAngle(ang):
+        if ang > np.pi:
+            return ang - 2 * np.pi
+        elif ang < -np.pi:
+            return ang + 2 * np.pi
+        return ang
+
 
     @staticmethod
     def readFromFile(path:str, use_flag:bool = False)->np.array:
@@ -39,6 +50,34 @@ class TrajEval:
             if use_flag:
                 return result[result[:, -1] > 0.5, :-1]
             return result
+
+    @staticmethod
+    def icpPostProcess(data:np.array, gt:np.array):
+        query_c, pair_c = np.zeros(2, dtype = float), np.zeros(2, dtype = float)
+        qpt = np.zeros((2, 2), dtype = float)
+        query_start_p, base_start_p = data[0, 1:-1], gt[0, 1:-1]
+        for i, time_stamp in enumerate(data[:, 0]):
+            idx, _ = TrajEval.binarySearch(time_stamp, gt[:, 0])
+            query_pt = data[i, 1:-1]
+            value_pt = gt[idx, 1:-1]
+            query_c += query_pt
+            pair_c += value_pt
+            qpt += (query_pt - query_start_p).reshape(-1, 1) @ (value_pt - base_start_p).reshape(1, -1)
+        query_c /= data.shape[0]
+        pair_c /= data.shape[0]
+        qpt -= data.shape[0] * (query_c - query_start_p).reshape(-1, 1) @ (pair_c - base_start_p).reshape(1, -1)
+        trans = np.zeros((3, 3), dtype = float)
+        u, s, vh = svd(qpt)
+        r = vh.T @ u.T
+        rr = vh.T @ np.array([[1., 0.], [0., det(r)]]) @ u.T
+        translation = (pair_c.reshape(-1, 1) - rr @ query_c.reshape(-1, 1))[:2].ravel()
+        delta_angle = np.arctan2(rr[1, 0], rr[0, 0])
+        result = np.zeros_like(data)
+        result[:, 0] = data[:, 0] 
+        for i in range(data.shape[0]):
+            result[i, 1:-1] = data[i, 1:-1].reshape(1, -1) @ rr.T + translation
+            result[i, -1] = TrajEval.goodAngle(data[i, -1] + delta_angle)
+        return result
 
     @staticmethod
     def binarySearch(val, target_list):
@@ -122,7 +161,7 @@ class TrajEval:
         transform = np.abs if make_abs else np.array
         x_error = transform(x_error)
         y_error = transform(y_error)
-        theta_error = transform(theta_error)
+        theta_error = list(map(abs, theta_error))
         x_mean, x_std = np.mean(x_error), np.std(x_error)
         y_mean, y_std = np.mean(y_error), np.std(y_error)
         t_mean, t_std = np.mean(theta_error), np.std(theta_error)
@@ -206,17 +245,25 @@ class TrajEval:
         gt_data = TrajEval.readFromFile(gt_file_path)
         carto_path = folder + "carto_%d.tjc"%(traj_id)
         carto_data = TrajEval.readFromFile(carto_path)
+        carto_data = TrajEval.icpPostProcess(carto_data, gt_data)
 
-        gmap_path = folder + "gmap_%d.tjc"%(traj_id)
-        gmap_data = TrajEval.readFromFile(gmap_path)
+        # gmap_path = folder + "gmap_%d.tjc"%(traj_id)
+        # gmap_data = TrajEval.readFromFile(gmap_path)
 
         c_traj_path = folder + "c_traj_%d.tjc"%(traj_id)
         cslam_data = TrajEval.readFromFile(c_traj_path)
+        cslam_data = TrajEval.icpPostProcess(cslam_data, gt_data)
 
         TrajEval.visualizeOneTrajectory(gt_data, 2, label = 'Ground truth')
+
         TrajEval.visualizeOneTrajectory(carto_data, 7, label = 'cartographer trajectory')
-        TrajEval.visualizeOneTrajectory(gmap_data, 7, label = 'GMapping trajectory')
+        x_error, y_error, theta_error, error_2d, error_3d = TrajEval.temperalNearestNeighborEvaluator(carto_data, gt_data)
+        TrajEval.mean_std(x_error, y_error, theta_error, error_2d, error_3d, False, True)
+        # TrajEval.visualizeOneTrajectory(gmap_data, 7, label = 'GMapping trajectory')
         TrajEval.visualizeOneTrajectory(cslam_data, 7, label = 'chain SLAM trajectory')
+        print("=====================================")
+        x_error, y_error, theta_error, error_2d, error_3d = TrajEval.temperalNearestNeighborEvaluator(cslam_data, gt_data)
+        TrajEval.mean_std(x_error, y_error, theta_error, error_2d, error_3d, False, True)
         plt.legend()
         plt.grid(axis = 'both')
         plt.show()
@@ -234,9 +281,29 @@ def automatic_runner():
 def trajectory_compare():
     TrajEval.visualizeDifferentMethods(argv[1], int(argv[2]))
 
+def visualizeICP():
+    folder = argv[1]
+    traj_id = int(argv[2])
+    gt_file_path = folder + "c_gt.tjc"
+    gt_data = TrajEval.readFromFile(gt_file_path)
+    carto_path = folder + "carto_%d.tjc"%(traj_id)
+    carto_data = TrajEval.readFromFile(carto_path)
+    align_carto = TrajEval.icpPostProcess(carto_data, gt_data)
+    plt.plot(gt_data[:, 1], gt_data[:, 2], label = 'gt')
+    plt.scatter(gt_data[:, 1], gt_data[:, 2])
+    plt.plot(carto_data[:, 1], carto_data[:, 2], label = 'before')
+    plt.scatter(carto_data[:, 1], carto_data[:, 2])
+    plt.plot(align_carto[:, 1], align_carto[:, 2], label = 'after')
+    plt.scatter(align_carto[:, 1], align_carto[:, 2])
+    plt.grid(axis = 'both')
+    plt.legend()
+    plt.show()
+
 
 if __name__ == "__main__":
     # TrajEval.traverseFolder(argv[1], argv[2], verbose = True, save_fig = True)
-    automatic_runner()
+    # automatic_runner()
     # TrajEval.visualizeWithGT(argv[1], "carto_0")
     # TrajEval.readFromFile(argv[1])
+    trajectory_compare()
+    # visualizeICP()
