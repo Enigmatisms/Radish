@@ -4,13 +4,21 @@
     Trajectory evaluator for pure LiDAR-based chain SLAM, cartographer and GMapping
 """
 
-from tabnanny import verbose
-from unittest import result
-import numpy as np
-from numpy.linalg import svd, det
-import matplotlib.pyplot as plt
 import os
+import csv
+import argparse
+import numpy as np
+import matplotlib.pyplot as plt
+
 from sys import argv
+from numpy.linalg import svd, det
+
+all_method_names = ("cartographer", "chain SLAM", "GMapping", "bosch")
+error_cats = ("traj abs", "traj sqr", "rot abs", "rot sqr")
+data_cats = ("mean", "std")
+
+# 这是我写过的最迷惑的列表生成式
+__header__ = ["%s %s %s"%(n, error_cat, data_cat) for n in all_method_names for error_cat in error_cats for data_cat in data_cats]
 
 # 输入的轨迹应有shape (轨迹点数，4)，第一维度是时间戳
 class TrajEval:
@@ -24,7 +32,6 @@ class TrajEval:
         elif ang < -np.pi:
             return ang + 2 * np.pi
         return ang
-
 
     @staticmethod
     def readFromFile(path:str, use_flag:bool = False)->np.array:
@@ -104,11 +111,10 @@ class TrajEval:
     def temperalNearestNeighborEvaluator(src:np.array, dst:np.array):
         # 点数更多的作为被查找对象（GMapping可能就是稀疏轨迹）
         def compare(base:np.array, query:np.array):
-            x_error = []
-            y_error = []
-            theta_error = []
-            error_2d = []
-            error_3d = []
+            abs_traj_2d = []
+            sqr_traj_2d = []
+            abs_rot_2d = []
+            sqr_rot_2d = []
             for i, time_stamp in enumerate(query[:, 0]):
                 idx, _ = TrajEval.binarySearch(time_stamp, base[:, 0])
                 query_pt = query[i, 1:]
@@ -118,12 +124,12 @@ class TrajEval:
                     diff[2] -= 2 * np.pi
                 if diff[2] < -np.pi:
                     diff[2] += 2 * np.pi
-                x_error.append(diff[0])
-                y_error.append(diff[1])
-                theta_error.append(diff[2])
-                error_2d.append(np.linalg.norm(diff[:2]))
-                error_3d.append(np.linalg.norm(diff))
-            return x_error, y_error, theta_error, error_2d, error_3d
+                diff_dist = np.linalg.norm(diff[:2])
+                abs_traj_2d.append(diff_dist)
+                sqr_traj_2d.append(diff_dist ** 2)
+                abs_rot_2d.append(abs(diff[2]))
+                sqr_rot_2d.append(diff[2] ** 2)
+            return abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d
         if len(dst) >= len(src):
             return compare(dst, src)
         else:
@@ -156,76 +162,19 @@ class TrajEval:
         plt.subplot(1, 2, 2)
         plt.plot(xs, error3d, label = 'absolute error y-axis')
 
+    # 只比较L1 2D轨迹以及旋转误差 / L2 2D轨迹与旋转误差
     @staticmethod
-    def mean_std(x_error, y_error, theta_error, error_2d, error_3d, make_abs = False, verbose = True):
-        transform = np.abs if make_abs else np.array
-        x_error = transform(x_error)
-        y_error = transform(y_error)
-        theta_error = list(map(abs, theta_error))
-        x_mean, x_std = np.mean(x_error), np.std(x_error)
-        y_mean, y_std = np.mean(y_error), np.std(y_error)
-        t_mean, t_std = np.mean(theta_error), np.std(theta_error)
-        err_mean_2d, err_std_2d = np.mean(error_2d), np.std(error_2d)
-        err_mean_3d, err_std_3d = np.mean(error_3d), np.std(error_3d)
-        complement = " (absolute)" if make_abs else ""
+    def mean_std(abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d, verbose = True):
+        abs_traj_2d_mean, abs_traj_2d_std = np.mean(abs_traj_2d), np.std(abs_traj_2d)
+        sqr_traj_2d_mean, sqr_traj_2d_std = np.mean(sqr_traj_2d), np.std(sqr_traj_2d)
+        abs_rot_2d_mean, abs_rot_2d_std = np.mean(abs_rot_2d), np.std(abs_rot_2d)
+        sqr_rot_2d_mean, sqr_rot_2d_std = np.mean(sqr_rot_2d), np.std(sqr_rot_2d)
         if verbose:
-            print("Error X:\t%.6lf±%.6f%s"%(x_mean, x_std, complement))
-            print("Error Y:\t%.6lf±%.6f%s"%(y_mean, y_std, complement))
-            print("Error theta:\t%.6lf±%.6f%s"%(t_mean, t_std, complement))
-            print("Error 2D:\t%.6lf±%.6f%s"%(err_mean_2d, err_std_2d, complement))
-            print("Error 3D:\t%.6lf±%.6f%s"%(err_mean_3d, err_std_3d, complement))
-        return (x_mean, x_std), (y_mean, y_std), (t_mean, t_std), (err_mean_2d, err_std_2d), (err_mean_3d, err_std_3d)
-
-    @staticmethod
-    def traverseFolder(folder:str, start_with:str, save_fig:bool = False, make_abs:bool = False, verbose:bool = False, use_flag = False):
-        all_stuff = os.listdir(folder)
-        gt_file_path = folder + "c_gt.tjc"
-        if not os.path.exists(gt_file_path):
-            raise RuntimeError("No ground truth file named 'c_gt.tjc' found in folder '%s', which is demanded by evaluator."%(folder))
-        gt_data = TrajEval.readFromFile(gt_file_path)
-        x_means = []
-        y_means = []
-        t_means = []
-        traj_2d_means = []
-        traj_3d_means = []
-        i = 0
-        for stuff in all_stuff:
-            stuff_path = folder + stuff
-            if not os.path.isfile(stuff_path):
-                continue
-            if not stuff.startswith(start_with):
-                continue
-            if start_with == "gmap_" and stuff == "gmap_gt.txt":
-                continue
-            traj_data = TrajEval.readFromFile(stuff_path, use_flag)
-            x_error, y_error, theta_error, error_2d, error_3d = TrajEval.temperalNearestNeighborEvaluator(traj_data, gt_data)
-            # 提供一个可以自动保存部分截图的方法
-            if save_fig:
-                fig_folder = folder + "eval_figs/"
-                if os.path.exists(fig_folder) == False:
-                    os.mkdir(fig_folder)
-                # TrajEval.visualizePerDimError(x_error, y_error, theta_error)
-                # plt.savefig(fig_folder + start_with + "%d_err_dim.jpg"%(i))
-                # plt.clf()
-                # TrajEval.visualizeTrajError(error_2d, error_3d)
-                # plt.savefig(fig_folder + start_with + "%d_err_traj.jpg"%(i))
-                # plt.clf()
-                TrajEval.visualizeWithGT(folder, stuff[:-4], use_flag)
-                plt.savefig(fig_folder + start_with + "%d_gt_traj.png"%(i))
-                plt.clf()
-                plt.cla()
-            if verbose:
-                print("============== %s%d error output %s ================"%(start_with, i, stuff))
-            (x_mean, _), (y_mean, _), (t_mean, _), (err_mean_2d, _), (err_mean_3d, _) = \
-            TrajEval.mean_std(x_error, y_error, theta_error, error_2d, error_3d, make_abs, verbose)
-            x_means.append(x_mean)
-            y_means.append(y_mean)
-            t_means.append(t_mean)
-            traj_2d_means.append(err_mean_2d)
-            traj_3d_means.append(err_mean_3d)
-            i += 1
-        print("\n============== Total error output ================")
-        TrajEval.mean_std(x_means, y_means, t_means, traj_2d_means, traj_3d_means, make_abs, True)
+            print("Absolute Trajectory Error:\t%.6lf±%.6f"%(abs_traj_2d_mean, abs_traj_2d_std))
+            print("Squared Trajectory Error:\t%.6lf±%.6f"%(sqr_traj_2d_mean, sqr_traj_2d_std))
+            print("Absolute Rotational Error:\t%.6lf±%.6f"%(abs_rot_2d_mean, abs_rot_2d_std))
+            print("Squared Rotational Error:\t%.6lf±%.6f"%(sqr_rot_2d_mean, sqr_rot_2d_std))
+        return [abs_traj_2d_mean, abs_traj_2d_std, sqr_traj_2d_mean, sqr_traj_2d_std, abs_rot_2d_mean, abs_rot_2d_std, sqr_rot_2d_mean, sqr_rot_2d_std]
 
     @staticmethod
     def visualizeWithGT(folder:str, traj_name:str, use_flag:bool = False):
@@ -240,33 +189,54 @@ class TrajEval:
         # plt.show()
 
     @staticmethod
-    def visualizeDifferentMethods(folder:str, traj_id:int):
+    def append2csv(csv_pos, all_info):
+        with open(csv_pos, 'a', newline='') as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(all_info)
+        csv_file.close()
+
+    @staticmethod
+    def visualizeDifferentMethods(folder:str, traj_id:int, verbose:bool = True, save_fig:bool = True):
         gt_file_path = folder + "c_gt.tjc"
         gt_data = TrajEval.readFromFile(gt_file_path)
-        carto_path = folder + "carto_%d.tjc"%(traj_id)
-        carto_data = TrajEval.readFromFile(carto_path)
-        carto_data = TrajEval.icpPostProcess(carto_data, gt_data)
-
-        # gmap_path = folder + "gmap_%d.tjc"%(traj_id)
-        # gmap_data = TrajEval.readFromFile(gmap_path)
-
-        c_traj_path = folder + "c_traj_%d.tjc"%(traj_id)
-        cslam_data = TrajEval.readFromFile(c_traj_path)
-        cslam_data = TrajEval.icpPostProcess(cslam_data, gt_data)
-
-        TrajEval.visualizeOneTrajectory(gt_data, 2, label = 'Ground truth')
-
-        TrajEval.visualizeOneTrajectory(carto_data, 7, label = 'cartographer trajectory')
-        x_error, y_error, theta_error, error_2d, error_3d = TrajEval.temperalNearestNeighborEvaluator(carto_data, gt_data)
-        TrajEval.mean_std(x_error, y_error, theta_error, error_2d, error_3d, False, True)
-        # TrajEval.visualizeOneTrajectory(gmap_data, 7, label = 'GMapping trajectory')
-        TrajEval.visualizeOneTrajectory(cslam_data, 7, label = 'chain SLAM trajectory')
-        print("=====================================")
-        x_error, y_error, theta_error, error_2d, error_3d = TrajEval.temperalNearestNeighborEvaluator(cslam_data, gt_data)
-        TrajEval.mean_std(x_error, y_error, theta_error, error_2d, error_3d, False, True)
+        if save_fig:
+            plt.figure(dpi = 320)
+            plt.rcParams["figure.figsize"] = [10.0, 6.0]
+            plt.subplots_adjust(left=0.075, right=0.925, top=0.925, bottom=0.075)
+        
+        all_methods = ("carto_%d.tjc"%(traj_id), "c_traj_%d.tjc"%(traj_id), "gmap_%d.tjc"%(traj_id), "bosch_%d.tjc"%(traj_id))
+        
+        csv_path = folder + "eval_result.csv"
+        if traj_id == 0:
+            with open(csv_path, 'w') as tmp:
+                writer = csv.writer(tmp)
+                writer.writerow(__header__)
+        all_results = []
+        for method, name in zip(all_methods, all_method_names):
+            path = folder + method
+            if not os.path.exists(path):
+                all_results.extend([0. for _ in range(8)])
+                continue
+            data = TrajEval.readFromFile(path)
+            data = TrajEval.icpPostProcess(data, gt_data)
+            TrajEval.visualizeOneTrajectory(data, 2, label = '%s trajectory'%(name), linewidth=1)
+            abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d = TrajEval.temperalNearestNeighborEvaluator(data, gt_data)
+            if verbose:
+                print("=============== %s evaluation results ==================="%(name))
+            
+            all_info = TrajEval.mean_std(abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d, verbose = verbose)
+            all_results.extend(all_info)
+        TrajEval.visualizeOneTrajectory(gt_data, 2, label = 'Ground truth', linewidth=1)
+        TrajEval.append2csv(folder + "eval_result.csv", all_results)
         plt.legend()
         plt.grid(axis = 'both')
-        plt.show()
+        if save_fig == True:
+            fig_folder_path = folder + "eval_figs/"
+            if not os.path.exists(fig_folder_path):
+                os.mkdir(fig_folder_path)
+            plt.savefig(fig_folder_path + "eval_result_%d.png"%(traj_id))
+        else:
+            plt.show()
 
 def binarySearchTest():
     test_list = [1, 5, 7, 10, 13.5, 16.2, 20, 26, 30, 31, 32, 36]
@@ -274,9 +244,6 @@ def binarySearchTest():
     for q in queries:
         idx, result = TrajEval.binarySearch(q, test_list)
         print("Query: %f, result: %d, %f"%(q, idx, result))
-
-def automatic_runner():
-    TrajEval.traverseFolder(argv[1], argv[2], verbose = True, save_fig = True, use_flag = False)
 
 def trajectory_compare():
     TrajEval.visualizeDifferentMethods(argv[1], int(argv[2]))
@@ -289,21 +256,23 @@ def visualizeICP():
     carto_path = folder + "carto_%d.tjc"%(traj_id)
     carto_data = TrajEval.readFromFile(carto_path)
     align_carto = TrajEval.icpPostProcess(carto_data, gt_data)
+    plt.figure(dpi = 320)
     plt.plot(gt_data[:, 1], gt_data[:, 2], label = 'gt')
-    plt.scatter(gt_data[:, 1], gt_data[:, 2])
+    plt.scatter(gt_data[:, 1], gt_data[:, 2], s = 1)
     plt.plot(carto_data[:, 1], carto_data[:, 2], label = 'before')
-    plt.scatter(carto_data[:, 1], carto_data[:, 2])
+    plt.scatter(carto_data[:, 1], carto_data[:, 2], s = 1)
     plt.plot(align_carto[:, 1], align_carto[:, 2], label = 'after')
-    plt.scatter(align_carto[:, 1], align_carto[:, 2])
+    plt.scatter(align_carto[:, 1], align_carto[:, 2], s = 1)
     plt.grid(axis = 'both')
     plt.legend()
     plt.show()
 
 
 if __name__ == "__main__":
-    # TrajEval.traverseFolder(argv[1], argv[2], verbose = True, save_fig = True)
-    # automatic_runner()
-    # TrajEval.visualizeWithGT(argv[1], "carto_0")
-    # TrajEval.readFromFile(argv[1])
-    trajectory_compare()
-    # visualizeICP()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-f", "--save_fig", default = False, action = "store_true", help = "Save figures during evaluation")
+    parser.add_argument("-v", "--verbose", default = False, action = "store_true", help = "Output evaluation info in the terminal")
+    parser.add_argument("--path", type = str, help = "Folder which contains all the trajectories")
+    parser.add_argument("--traj_num", type = int, default = 0, help = "Trajectory file id")
+    args = parser.parse_args()
+    TrajEval.visualizeDifferentMethods(args.path, args.traj_num, args.verbose, args.save_fig)

@@ -1,12 +1,12 @@
 
-methods=('bosch')
 for file in `find /home/stn/slam/trajectories/ -maxdepth 1 -type d -name "hfps*"`; do
     echo "Processing ${file}/"
     output_f="${file}/eval_output/"
     if [ ! -d ${output_f} ]; then
         mkdir -p ${output_f}
     fi
-    for method in ${methods[@]}; do
-        python3 ./traj_eval.py "${file}/" ${method} &> "${output_f}${method}_odom_result.txt"
+    all_nums=$(ls ${file}/carto* | wc -l)
+    for((i=0;i<${all_nums};i++)); do
+        python3 ./traj_eval.py --path="${file}/" --traj_num=${i} -f
     done
 done
