@@ -58,16 +58,15 @@ def fixAngleIncrement(bag_name):
             bag_out.write(topic, msg, t)
             continue
         point_num = ceil((msg.angle_max - msg.angle_min) / msg.angle_increment)
-        if len(msg.ranges) != point_num:
-            if original_max < 0:
-                original_max = msg.angle_max
-                original_min = msg.angle_min
-            msg.angle_max = msg.angle_min + msg.angle_increment * (len(msg.ranges) - 1)
-            if now_max < 0.0:
-                now_max = msg.angle_max
-                saved_point_num = len(msg.ranges) - 1
-                angle_inc = msg.angle_increment
-            fix_num += 1
+        if original_max < 0:
+            original_max = msg.angle_max
+            original_min = msg.angle_min
+        msg.angle_max = msg.angle_min + msg.angle_increment * (len(msg.ranges) - 1)
+        if now_max < 0.0:
+            now_max = msg.angle_max
+            saved_point_num = len(msg.ranges) - 1
+            angle_inc = msg.angle_increment
+        fix_num += 1
         bag_out.write(topic, msg, t)
     print("Previous angle max: %.7lf, current angle max %.7lf"%(original_max, now_max))
     print("Angle_min: %.6lf, angle inc: %.6lf, point num: %d"%(original_min, angle_inc, saved_point_num))
