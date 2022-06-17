@@ -3,6 +3,8 @@
     input trajectory and carmen relation file, output carmen log file
 """
 
+import os
+import sys
 import numpy as np
 from pose import Pose
 
@@ -11,7 +13,7 @@ def buildLookUp(input_name:str) -> dict:
         raw_inputs = file.readlines()
         all_input = [x[:-1].split(' ') for x in raw_inputs]
         result = dict()
-        for item in all_input:
+        for i, item in enumerate(all_input):
             key = int(item[0][:-6])
             result[key] = Pose(float(item[1]), float(item[2]), float(item[3]))
     return result
@@ -28,31 +30,60 @@ def getQueryData(input_name: str) -> dict:
             )
         return all_queries
 
-def evaluate(queries: list, lut: dict):
-    valid_cnt = half_valid_cnt = invalid_cnt = 0
-    l2_err_sum = 0.0
-    x_err_sum = y_err_sum = t_err_sum = 0.0
-    # 角度处理上需要考虑奇异性
+def evaluate(queries: list, lut: dict, verbose: bool = False):
+    half_valid_cnt = invalid_cnt = 0
+    l1_trans_err_sum = []
+    l2_err_sum = []
+
+    l1_angular_err_sum = []
+    l2_angular_err_sum = []
+    # 角度处理上需要考虑奇性
     for sq, eq, gt_pose in queries:
         if sq in lut and eq in lut:
             s_pose:Pose = lut[sq]
             e_pose:Pose = lut[eq]
             delta_pose:Pose = s_pose.inverse() * e_pose
             delta:Pose = (delta_pose - gt_pose).cWiseAbs()
-            l2_err_sum += delta.normSquared()
-            x_err_sum += delta.x
-            y_err_sum += delta.y
-            t_err_sum += delta.theta
-            valid_cnt += 1
+            l1_trans_err_sum.append(delta.x + delta.y)
+            l2_err_sum.append(delta.normSquared())
+            l1_angular_err_sum.append(delta.theta)
+            l2_angular_err_sum.append((delta.theta ** 2.))
         else:
             if sq in lut or eq in lut: half_valid_cnt += 1
             else: invalid_cnt += 1
-    print("========== Final error ===========")
-    print("Translation error: %f, %f"%(x_err_sum / valid_cnt, y_err_sum / valid_cnt))
-    print("Rotation error: %f, L2 MSE: %f"%(t_err_sum / valid_cnt, np.sqrt(l2_err_sum / valid_cnt)))
-    print("Valid query: %d, half valid query: %d, invalid: %d"%(valid_cnt, half_valid_cnt, invalid_cnt))
+
+    l1_trans_err_sum = np.array(l1_trans_err_sum)
+    l2_err_sum = np.array(l2_err_sum)
+    l1_angular_err_sum = np.array(l1_angular_err_sum)
+    l2_angular_err_sum = np.array(l2_angular_err_sum)
+
+    if verbose == True:
+        avg_l1_t_err = l1_trans_err_sum.mean()
+        avg_l2_t_err = l2_err_sum.mean()
+        avg_l1_r_err = l1_angular_err_sum.mean()
+        avg_l2_r_err = l2_angular_err_sum.mean()
+        sqrt_avg_l2_r_err = np.sqrt(avg_l2_r_err)
+        print("========== Final error ===========")
+        print("Translation error: %f, %f"%(avg_l1_t_err, avg_l2_t_err))
+        print("Rotation error: %f, L2 MSE: %f, sqrt: %f"%(avg_l1_r_err, avg_l2_r_err, sqrt_avg_l2_r_err))
+        print("Valid query: %d, half valid query: %d, invalid: %d"%(len(l2_err_sum), half_valid_cnt, invalid_cnt))
+    return np.stack([l1_trans_err_sum, l2_err_sum, l1_angular_err_sum, l2_angular_err_sum], axis = 0)
+    
 
 if __name__ == "__main__":
-    lut = buildLookUp("./data/fr079.txt")
-    query = getQueryData("./data/fr079.relations.txt")
-    evaluate(query, lut)
+    map_name = sys.argv[1]
+    query = getQueryData("./data/%s.relations.txt"%(map_name))
+    result = []
+    for i in range(5):
+        path = "./data/%s/c_traj_%d.tjc"%(map_name, i)
+        if os.path.exists(path) == False:
+            break
+        lut = buildLookUp(path)
+        result.append(evaluate(query, lut))
+        print("trajectory %d is processed.\n"%(i))
+    final_result = np.hstack(result)
+    result_mean = final_result.mean(axis = 1)
+    result_std = final_result.std(axis = 1)
+    print("========== Final error for %s ==========="%(map_name))
+    print("Translation error: %f±%f, %f±%f"%(result_mean[0], result_std[0], result_mean[1], result_std[1]))
+    print("Rotation error: %f±%f, L2 MSE: %f±%f"%(result_mean[2], result_std[2], result_mean[3], result_std[3]))

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from sys import argv
 from numpy.linalg import svd, det
 
-all_method_names = ("cartographer", "chain SLAM", "GMapping", "bosch")
+all_method_names = ("cartographer", "chain SLAM", "GMapping", "SLAM toolbox")
 error_cats = ("traj abs", "traj sqr", "rot abs", "rot sqr")
 data_cats = ("mean", "std")
 
@@ -204,7 +204,7 @@ class TrajEval:
             plt.rcParams["figure.figsize"] = [10.0, 6.0]
             plt.subplots_adjust(left=0.075, right=0.925, top=0.925, bottom=0.075)
         
-        all_methods = ("carto_%d.tjc"%(traj_id), "c_traj_%d.tjc"%(traj_id), "gmap_%d.tjc"%(traj_id), "bosch_%d.tjc"%(traj_id))
+        all_methods = ("carto_%d.tjc"%(traj_id), "c_traj_%d.tjc"%(traj_id), "gmap_%d.tjc"%(traj_id), "toolbox_%d.tjc"%(traj_id))
         
         csv_path = folder + "eval_result.csv"
         if traj_id == 0:
@@ -238,6 +238,84 @@ class TrajEval:
         else:
             plt.show()
 
+    @staticmethod
+    def bestCounter(directory: str):
+        result = np.zeros((4, 4))
+        for folder in os.listdir(directory):
+            if os.path.isdir(directory + folder) == False:
+                continue
+            if (not folder.startswith("hfps")):
+                continue
+            folder = directory + folder + "/"
+            local_sum = np.zeros((4, 4))
+            local_cnt = np.zeros(4)
+            for traj_id in range(5):
+                gt_file_path = folder + "c_gt.tjc"
+                gt_data = TrajEval.readFromFile(gt_file_path)
+                all_methods = ("carto_%d.tjc"%(traj_id), "c_traj_%d.tjc"%(traj_id), "gmap_%d.tjc"%(traj_id), "toolbox_%d.tjc"%(traj_id))
+
+                local_means = []
+                for i, (method, name) in enumerate(zip(all_methods, all_method_names)):
+                    path = folder + method
+                    if not os.path.exists(path):
+                        local_means.append([0 for _ in range(4)])
+                        continue
+                    print("Path exists: %s"%(path))
+                    data = TrajEval.readFromFile(path)
+                    data = TrajEval.icpPostProcess(data, gt_data)
+                    TrajEval.visualizeOneTrajectory(data, 2, label = '%s trajectory'%(name), linewidth=1)
+                    abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d = TrajEval.temperalNearestNeighborEvaluator(data, gt_data)
+
+                    all_info = TrajEval.mean_std(abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d, verbose = False)
+                    if all_info[0] > 0.25 or all_info[1] > 0.25:
+                        local_means.append([0 for _ in range(4)])       # 保存所有的均值
+                    else:
+                        local_means.append([all_info[i] for i in range(0, 8, 2)])       # 保存所有的均值
+                        local_cnt[i] += 1
+                local_sum += np.array(local_means) # 4 * 4张量
+            for i in range(4):
+                if local_cnt[i] < 1:
+                    local_sum[i, :] = 1e5
+                    local_cnt[i] = 1
+            local_sum /= local_cnt.reshape(-1, 1)
+            max_index = local_sum.argmin(axis = 0)
+            col_index = np.arange(4)
+            to_add = np.zeros((4, 4))
+            to_add[max_index, col_index] = 1
+            result += to_add
+        print(result)
+
+    @staticmethod
+    def meanStdCalculation(folder: str):
+        all_methods = ("carto", "c_traj", "gmap", "toolbox")
+        gt_file_path = folder + "c_gt.tjc"
+        gt_data = TrajEval.readFromFile(gt_file_path)
+        for _, method in enumerate(all_methods):
+            result = np.zeros(8)
+            cnt = 0
+            for traj_id in range(5):
+                path = folder + "%s_%d.tjc"%(method, traj_id)
+                if not os.path.exists(path):
+                    break
+                data = TrajEval.readFromFile(path)
+                data = TrajEval.icpPostProcess(data, gt_data)
+                abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d = TrajEval.temperalNearestNeighborEvaluator(data, gt_data)
+                all_info = TrajEval.mean_std(abs_traj_2d, sqr_traj_2d, abs_rot_2d, sqr_rot_2d, verbose = False)
+                if all_info[0] > 0.2 or all_info[1] > 0.2:
+                    continue
+                result += np.array(all_info)
+                cnt += 1
+            param_name = folder.split("/")[-2]
+            if cnt == 0:
+                print("===================== Method %s for %s ====================="%(method, param_name))
+                print("Method %s has no viable result."%(method))
+            else:
+                result /= cnt
+                print("===================== Method %s for %s ====================="%(method, param_name))
+                print("Translation err L1: %f±%f, L2: %f±%f"%(result[0], result[1], result[2], result[3]))
+                print("Rotation err L1: %f±%f, L2: %f±%f"%(result[4], result[5], result[6], result[7]))
+            
+
 def binarySearchTest():
     test_list = [1, 5, 7, 10, 13.5, 16.2, 20, 26, 30, 31, 32, 36]
     queries = [4, 5.9, 6.0, 6.2, 8.5, 8.499, 8.9, -1, 60, 31.3, 20, 26, 26.1, 0.9999, 1.01, 1, 36.000000000001]
@@ -267,8 +345,13 @@ def visualizeICP():
     plt.legend()
     plt.show()
 
+def bestCounterMain():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", type = str, help = "Folder which contains all the trajectories")
+    args = parser.parse_args()
+    TrajEval.bestCounter(args.path)
 
-if __name__ == "__main__":
+def visualizeTrajectoryMain():
     parser = argparse.ArgumentParser()
     parser.add_argument("-f", "--save_fig", default = False, action = "store_true", help = "Save figures during evaluation")
     parser.add_argument("-v", "--verbose", default = False, action = "store_true", help = "Output evaluation info in the terminal")
@@ -276,3 +359,12 @@ if __name__ == "__main__":
     parser.add_argument("--traj_num", type = int, default = 0, help = "Trajectory file id")
     args = parser.parse_args()
     TrajEval.visualizeDifferentMethods(args.path, args.traj_num, args.verbose, args.save_fig)
+
+def meanStdCalcMain():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", type = str, help = "Folder which contains all the trajectories")
+    args = parser.parse_args()
+    TrajEval.meanStdCalculation(args.path)
+
+if __name__ == "__main__":
+    bestCounterMain()

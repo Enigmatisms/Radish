@@ -10,6 +10,8 @@ import logging
 from sys import argv
 from math import ceil, floor, pi
 from collections import deque
+from tf2_msgs.msg import TFMessage
+from geometry_msgs.msg import TransformStamped
 
 logging.basicConfig()
 
@@ -27,7 +29,7 @@ def scanTrimmer(bag_name):
     origin_length, actual_length = 0, 0
     initialized = False
     total_length, start_id, valid_len, invalid_cnt = 0, 0, 0, 0
-    max_len = 60
+    max_len = 3
     queue = deque([], maxlen = max_len)
     for i, (topic, msg, t) in enumerate(bag_in.read_messages()):
         total_length += 1
@@ -86,6 +88,39 @@ def onlyScanGood(bag_name):
     bag_out.close()
     print("Process completed.")
 
+def make_gmapping(bag_name):
+    name_no_ext = bag_name.split('.')[0]
+    bag_in = rosbag.Bag(bag_name, "r")
+    bag_out = rosbag.Bag(name_no_ext + "_good.bag", "w")
+    for topic, msg, t in bag_in.read_messages():
+        if topic in {"odom", "/odom"}:
+            continue
+        elif topic in {"/tf", "tf"}:
+            transform = msg.transforms[0]
+            transform.header.frame_id = "odom"
+            transform.child_frame_id = "scan"
+            tf_msg = TFMessage()
+            tf_msg.transforms.append(transform)
+            bag_out.write("tf", tf_msg, t)
+        else:
+            bag_out.write(topic, msg, t)
+    bag_in.close()
+    bag_out.close()
+    print("Process completed.")
+
+def change_topic(bag_name):
+    name_no_ext = bag_name.split('.')[0]
+    bag_in = rosbag.Bag(bag_name, "r")
+    bag_out = rosbag.Bag(name_no_ext + "_good.bag", "w")
+    for topic, msg, t in bag_in.read_messages():
+        if topic in {"/Lidar", "Lidar"}:
+            bag_out.write("scan", msg, t)
+        elif topic in {"/Odom", "Odom"}:
+            bag_out.write("odom", msg, t)
+    bag_in.close()
+    bag_out.close()
+    print("Process completed.")
+
 def tfRemoval(bag_name):
     name_no_ext = bag_name.split('.')[0]
     bag_in = rosbag.Bag(bag_name, "r")
@@ -94,6 +129,21 @@ def tfRemoval(bag_name):
         if not str(msg._type) == "sensor_msgs/LaserScan":
             continue
         bag_out.write(topic, msg, t)
+    print("Process completed. All the messages in the output bag should be of type 'sensor_msgs/LaserScan'.")
+    bag_in.close()
+    bag_out.close()
+
+def bagSparify(bag_name):
+    name_no_ext = bag_name.split('.')[0]
+    bag_in = rosbag.Bag(bag_name, "r")
+    bag_out = rosbag.Bag(name_no_ext + "_sp.bag", "w")
+    cnt = 0
+    for topic, msg, t in bag_in.read_messages():
+        if not str(msg._type) == "sensor_msgs/LaserScan":
+            continue
+        if cnt % 6 == 0:
+            bag_out.write(topic, msg, t)
+        cnt += 1
     print("Process completed. All the messages in the output bag should be of type 'sensor_msgs/LaserScan'.")
     bag_in.close()
     bag_out.close()
@@ -114,10 +164,10 @@ def conditionalRemove(bag_name, topic_name):
 
 if __name__ == "__main__":
     if len(argv) < 3:
-        print("Usage: python2 ./modifyScan.py <input rosbag name>.bag <intended angle span in rads>")
+        print("Usage: python ./modifyScan.py <input rosbag name>.bag <intended angle span in rads>")
         exit(-1)
     bag_name = argv[1]
-    scanTrimmer(bag_name)
+    bagSparify(bag_name)
     # tfRemoval(bag_name)
     # conditionalRemove(bag_name, "/scan")
     
